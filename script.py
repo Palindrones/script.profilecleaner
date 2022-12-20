@@ -111,7 +111,7 @@ class Cleaner:
 				jSon = json.loads(jSonQuery)
 
 				if jSon['result'].get(mediaType):
-					totalResults = jSon['result']['limits'].get('total')
+					totalResults = jSon['result']['limits']['total'] if 'limits' in jSon['result'] else len(jSon['result'][mediaType])
 					log("Found %d %s in the database" % (totalResults, mediaType))
 					for item in jSon['result'][mediaType]:
 						if showGUI:
@@ -126,8 +126,6 @@ class Cleaner:
 							for artKey, artValue in item['art'].items():		#for json art dictionary objects in movies/tvshows/episodes
 								if artKey.startswith('tvshow.') or 'DefaultVideo.png' in artValue: continue	# check for bad season/episode entries *performance 
 								cleanandAppendUrl(artValue, thumbnailsList)
-								if item['label'] == "Season 1": # Workaround for tv show seasons all posters
-									cleanandAppendUrl(artValue.replace("season01", "season-all"), thumbnailsList)
 						if item.get('cast'):
 							for cast in  item['cast']:	#for actors in movies/tvshows/episodes	
 								if cast.get('thumbnail'):
@@ -137,7 +135,10 @@ class Cleaner:
 							cleanandAppendUrl(item['thumbnail'], thumbnailsList)
 						if item.get('fanart'):			#for json thumbnail objects // conditional fails on missing key or emtpy string or None value
 							cleanandAppendUrl(item['fanart'], thumbnailsList)
+						if item.get('url'):					# Workaround for tv show seasons all posters // conditional fails on missing key or emtpy string or None value
+							cleanandAppendUrl(item['url'], thumbnailsList)
 						countList = countList + 1
+
 				if not self.cancelOperation and len(thumbnailsList):
 					thumbnailsList = removeDuplicate(thumbnailsList)
 					self.ExcludeThumbnailHash(thumbnailsList, normalize(
@@ -183,23 +184,26 @@ class Cleaner:
 			jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetTVShows", "params": {"properties": ["art"], "sort": {"order": "ascending", "method": "title", "ignorearticle": true}}, "id": 1}'
 			self._processMediaThumbnails('tvshows', jsonrpccommand, 32115, 32116)
 			#get tv show list
-			tvShows = []
+			jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetTVShows", "params": {"sort": {"order": "ascending", "method": "title", "ignorearticle": true}}, "id": 1}'
 			jSonQuery = xbmc.executeJSONRPC(jsonrpccommand)
 			jSon = json.loads(jSonQuery)
-			for tvshow in jSon['result']['tvshows']:
-				tvShows.append((tvshow['tvshowid'], tvshow['label']))
+			tvShows = jSon['result']['tvshows']
 
 		# Seasons
 		if addonSettings.getSetting("CheckSeasons") == "true":
 			for tvShow in tvShows:
-				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetSeasons", "params": {"properties": ["art"], "tvshowid": %s}, "id": 1}' % tvShow[0]
-				self._processMediaThumbnails('seasons', jsonrpccommand, 32117, 32118, tvShow[1])
+				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetSeasons", "params": {"properties": ["art"], "tvshowid": %s}, "id": 1}' % tvShow['tvshowid']
+				self._processMediaThumbnails('seasons', jsonrpccommand, 32117, 32118, tvShow['label'])
+				#all seasons poster workaround
+				jsonrpccommand = '{"id": 1, "jsonrpc": "2.0", "method": "VideoLibrary.GetAvailableArt", "params": {"arttype": "poster", "item": {"tvshowid": %s }}}' % tvShow['tvshowid']
+				self._processMediaThumbnails('availableart', jsonrpccommand, 32117, 32118, tvShow['label']+ ' - "all seasons"')
+
 
 		# Episodes
 		if addonSettings.getSetting("CheckEpisodes") == "true":
 			for tvShow in tvShows:
-				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetEpisodes", "params": {"properties": ["art"], "tvshowid": %s}, "id": 1}' % tvShow[0]
-				self._processMediaThumbnails('episodes', jsonrpccommand, 32119, 32120, tvShow[1])
+				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetEpisodes", "params": {"properties": ["art"], "tvshowid": %s}, "id": 1}' % tvShow['tvshowid']
+				self._processMediaThumbnails('episodes', jsonrpccommand, 32119, 32120, tvShow['label'])
 
 		# MusicVideos
 		if addonSettings.getSetting("CheckMusicVideos") == "true":
@@ -250,8 +254,8 @@ class Cleaner:
 			self._processMediaThumbnails('tvshows', jsonrpccommand, 32136, 32138)
 			# Episodes
 			for tvShow in tvShows:
-				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetEpisodes", "params": {"properties": ["cast"], "tvshowid": %s}, "id": 1}' % tvShow[0]
-				self._processMediaThumbnails('episodes', jsonrpccommand, 32137, 32138, tvShow[1])
+				jsonrpccommand = '{"jsonrpc": "2.0", "method": "VideoLibrary.GetEpisodes", "params": {"properties": ["cast"], "tvshowid": %s}, "id": 1}' % tvShow['tvshowid']
+				self._processMediaThumbnails('episodes', jsonrpccommand, 32137, 32138, tvShow['label'])
 
 		# Addons
 		if addonSettings.getSetting("CheckAddons") == "true":
@@ -426,7 +430,7 @@ class Cleaner:
 		addonRollback = os.path.join(homeFolder, "addons", "packages")
 		for item in os.listdir(addonRollback):
 			self.totalAddonSize = self.totalAddonSize + os.stat(os.path.join(addonRollback, item)).st_size
-		
+
 		if self.cancelOperation != True:
 			if (addonSettings.getSetting("DelAddonsSettings") == "true"):
 				log("Deleting addon settings for uninstalled addons")
@@ -465,7 +469,7 @@ class Cleaner:
 						except: pass
 						try: shutil.copytree(item, os.path.join(addonBackupFolder, realname))
 						except: pass
-						
+
 					if showGUI:
 						if self.Progress.iscanceled():
 							self.cancelOperation = True
@@ -509,7 +513,7 @@ class Cleaner:
 							self.Progress.update((countList * 100) / len(toDelete), normalize(addonLanguage(32162)) + item)
 						try: shutil.copy2(item, addonBackupFolder)
 						except: pass
-					
+
 					if showGUI:
 						if self.Progress.iscanceled():
 							self.cancelOperation = True
@@ -566,7 +570,7 @@ class Cleaner:
 							self.Progress.update((countList * 100) / len(toDelete), normalize(addonLanguage(32162)) + item)
 						try: shutil.copy2(item, addonBackupFolder)
 						except: pass
-					
+
 					if showGUI:
 						if self.Progress.iscanceled():
 							self.cancelOperation = True
@@ -598,11 +602,11 @@ class Cleaner:
 	def PerformCleanup(self, bitmask):
 		if addonSettings.getSetting("ShowNotifications") == "true" and not showGUI:
 			xbmc.executebuiltin("Notification(%s,%s,2000,%s)" % (addonName, normalize(addonLanguage(32164)), addonIcon))
-			
+
 		if (bitmask > 0 and showGUI):
 			self.Progress = xbmcgui.DialogProgress()
 			self.Progress.create(addonName)
-		
+
 		if ((bitmask & 1) == 1):
 			self.ThumbnailCleanup()
 		if ((bitmask & 2) == 2):
@@ -611,10 +615,10 @@ class Cleaner:
 			self.EmptyThumbnailTable()
 		if ((bitmask & 8) == 8):
 			self.AddonCleanup()
-			
+
 		if (bitmask > 0 and showGUI):
 			self.Progress.close()
-		
+
 		if addonSettings.getSetting("ShowNotifications") == "true" and not showGUI:
 			xbmc.executebuiltin("Notification(%s,%s,2000,%s)" % (addonName, normalize(addonLanguage(32165)), addonIcon))
 
